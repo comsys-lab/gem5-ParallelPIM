@@ -410,6 +410,12 @@ class CPU : public BaseCPU
      */
     bool removeInstsThisCycle;
 
+    /** Is inst the oldest instruction of its thread in the ROB, so that
+     *  no older instruction can squash it? (A translation that is not
+     *  speculative, LSQ::LSQRequest::speculative().)
+     */
+    bool isOldestInst(const DynInstPtr &inst);
+
   protected:
     /** The branch and PC address calculation stage. */
     BAC bac;

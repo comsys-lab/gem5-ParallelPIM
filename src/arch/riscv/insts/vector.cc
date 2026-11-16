@@ -957,5 +957,25 @@ VPinVdMicroInst::generateDisassembly(Addr pc,
     return ss.str();
 }
 
+bool
+VectorMemMacroInst::restartAt(uint32_t vstart)
+{
+    const uint32_t micro_vlmax = vlen / eew;
+    if (vstart == 0 || vstart % micro_vlmax != 0 ||
+        vstart / micro_vlmax >= microops.size()) {
+        return false;
+    }
+    // Keep the micro-op count, so that a micro-op PC (a re-execution from
+    // a micro-op) names the same micro-op in this and a normal instance.
+    for (size_t i = 0; i < vstart / micro_vlmax; i++) {
+        StaticInstPtr nop = new VectorNopMicroInst(machInst);
+        nop->setDelayedCommit();
+        if (i == 0)
+            nop->setFirstMicroop();
+        microops[i] = nop;
+    }
+    return true;
+}
+
 } // namespace RiscvISA
 } // namespace gem5

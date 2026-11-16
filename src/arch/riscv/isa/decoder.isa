@@ -1333,6 +1333,29 @@ decode QUADRANT default Unknown::unknown() {
             }
         }
 
+        // custom-0: processing-in-memory (PIM) RVV load-like
+        // instructions, unit stride, vm = 1, EEW from width, operation in
+        // lumop. lumop 0x02-0x1f, vm = 0, mop/mew/nf != 0, widths 1-4 and RV32
+        // stay Unknown.
+        0x02: decode RVTYPE {
+            0x1: decode MOP {
+                0x0: decode MEW {
+                    0x0: decode NF {
+                        0x0: decode VM {
+                            0x1: decode WIDTH {
+                                0x0, 0x5, 0x6, 0x7: decode LUMOP {
+                                    format PimVleOp {
+                                        0x00: pim_rd_gb('RdGb');
+                                        0x01: pim_rd_reg('RdReg');
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         0x03: decode FUNCT3 {
             format FenceOp {
                 0x0: fence({{
@@ -1346,40 +1369,41 @@ decode QUADRANT default Unknown::unknown() {
                 0x0: decode FUNCT12 {
                     format CBMOp {
                         0x0: cbo_inval({{
-                            SENVCFG senvcfg = xc->readMiscReg(MISCREG_SENVCFG);
-                            auto pm = (PrivilegeMode)xc->readMiscReg(
+                            SENVCFG senvcfg =
+                                xc->tcBase()->readMiscRegNoEffect(
+                                    MISCREG_SENVCFG);
+                            auto pm = (PrivilegeMode)
+                                xc->tcBase()->readMiscRegNoEffect(
                                     MISCREG_PRV);
 
+                            // U-mode follows senvcfg.CBIE: 00 faults, 01
+                            // flushes (clean and invalidate), 11
+                            // invalidates. M-mode always invalidates;
+                            // S-mode follows menvcfg.CBIE, which gem5 does
+                            // not model: it invalidates, as with the 11
+                            // that OpenSBI writes.
                             if (pm == PRV_U) {
                                 if (senvcfg.cbie == 0) {
                                     return std::make_shared<IllegalInstFault>(
-                                            "Can't execute cbo.clean in current"
+                                            "Can't execute cbo.inval in current"
                                             " privilege mode!", machInst);
-                                }
-                                else if (senvcfg.cbie == 1){ //flush
-                                    Mem = 0;
-                                }
-                                else if (senvcfg.cbie == 3) { // invalidate
-                                    Mem = 0;
-                                } else { //sebvcfg.cbie == 2, reserved
+                                } else if (senvcfg.cbie == 1) { // flush
+                                    memFlags.set(Request::CLEAN);
+                                } else if (senvcfg.cbie == 2) { // reserved
                                     return std::make_shared<IllegalInstFault>(
                                             "Invalid value for senvcfg.cbie!",
                                             machInst);
                                 }
-                            } else if (pm == PRV_M){ // all invalidate
-                                Mem = 0;
-                            } else if (pm == PRV_S) {
-                                // whether it's a flush or invalidate depends
-                                // on menvcfg (01 and 11 respectively)
-                                Mem = 0;
                             }
+                            Mem = 0;
                         }}, mem_flags = [INVALIDATE, DST_POC]);
-                            // mem_flags might need a conditional to add CLEAN
-                            // in certain cases; unsure of syntax for that
 
                         0x1: cbo_clean({{
-                            SENVCFG senvcfg = xc->readMiscReg(MISCREG_SENVCFG);
-                            auto pm = (PrivilegeMode)xc->readMiscReg(
+                            SENVCFG senvcfg =
+                                xc->tcBase()->readMiscRegNoEffect(
+                                    MISCREG_SENVCFG);
+                            auto pm = (PrivilegeMode)
+                                xc->tcBase()->readMiscRegNoEffect(
                                     MISCREG_PRV);
 
                             if (pm == PRV_U && !senvcfg.cbcfe){
@@ -1395,8 +1419,11 @@ decode QUADRANT default Unknown::unknown() {
                             }
                         }}, mem_flags=[CLEAN, DST_POC]);
                         0x2: cbo_flush({{
-                            SENVCFG senvcfg = xc->readMiscReg(MISCREG_SENVCFG);
-                            auto pm = (PrivilegeMode)xc->readMiscReg(
+                            SENVCFG senvcfg =
+                                xc->tcBase()->readMiscRegNoEffect(
+                                    MISCREG_SENVCFG);
+                            auto pm = (PrivilegeMode)
+                                xc->tcBase()->readMiscRegNoEffect(
                                     MISCREG_PRV);
 
                             if (pm == PRV_U && !senvcfg.cbcfe){
@@ -1412,8 +1439,11 @@ decode QUADRANT default Unknown::unknown() {
                             }
                         }}, mem_flags=[CLEAN, INVALIDATE, DST_POC]);
                         0x4: cbo_zero({{
-                            SENVCFG senvcfg = xc->readMiscReg(MISCREG_SENVCFG);
-                            auto pm = (PrivilegeMode)xc->readMiscReg(
+                            SENVCFG senvcfg =
+                                xc->tcBase()->readMiscRegNoEffect(
+                                    MISCREG_SENVCFG);
+                            auto pm = (PrivilegeMode)
+                                xc->tcBase()->readMiscRegNoEffect(
                                     MISCREG_PRV);
 
                             if (pm == PRV_U && !senvcfg.cbze){
@@ -2061,6 +2091,20 @@ decode QUADRANT default Unknown::unknown() {
                 }}, {{
                     EA = Rs1 + Vs2_ud[vs2ElemIdx];
                 }}, inst_flags=SimdIndexedStoreOp);
+            }
+        }
+
+        // custom-1: processing-in-memory (PIM) RVG store-like
+        // instructions. funct3 5-7 and RV32 stay Unknown.
+        0x0a: decode RVTYPE {
+            0x1: decode FUNCT3 {
+                format PimStore {
+                    0x0: pim_sb_ewadd('SbEwadd');
+                    0x1: pim_sb_ewmul('SbEwmul');
+                    0x2: pim_sb_ewadd_gbuf('SbEwaddGbuf');
+                    0x3: pim_sb_ewmul_gbuf('SbEwmulGbuf');
+                    0x4: pim_sb_mac('SbMac');
+                }
             }
         }
 
@@ -6016,6 +6060,38 @@ decode QUADRANT default Unknown::unknown() {
             }
         }
 
+        // custom-2: processing-in-memory (PIM) RVV store-like
+        // instructions, unit stride, vm = 1, EEW from width, operation in
+        // sumop. sumop 0x0b-0x1f, vm = 0, mop/mew/nf != 0, widths 1-4 and RV32
+        // stay Unknown.
+        0x16: decode RVTYPE {
+            0x1: decode MOP {
+                0x0: decode MEW {
+                    0x0: decode NF {
+                        0x0: decode VM {
+                            0x1: decode WIDTH {
+                                0x0, 0x5, 0x6, 0x7: decode SUMOP {
+                                    format PimVseOp {
+                                        0x00: pim_sb_mov_bkgbuf('SbMovBkgbuf');
+                                        0x01: pim_sb_mov_gbufbk('SbMovGbufbk');
+                                        0x02: pim_ab_ewadd('AbEwadd');
+                                        0x03: pim_ab_ewmul('AbEwmul');
+                                        0x04: pim_ab_ewadd_gbuf('AbEwaddGbuf');
+                                        0x05: pim_ab_ewmul_gbuf('AbEwmulGbuf');
+                                        0x06: pim_ab_mac('AbMac');
+                                        0x07: pim_ab_mov_regbk('AbMovRegbk');
+                                        0x08: pim_ab_mov_bkreg('AbMovBkreg');
+                                        0x09: pim_wr_gb('WrGb');
+                                        0x0a: pim_wr_reg('WrReg');
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         0x18: decode FUNCT3 {
             format BOp {
                 0x0: beq({{
@@ -6135,6 +6211,9 @@ decode QUADRANT default Unknown::unknown() {
                             NPC = virtualizationEnabled(xc) ?
                                 rvSext(xc->readMiscReg(MISCREG_VSEPC)) :
                                 rvSext(xc->readMiscReg(MISCREG_SEPC));
+                            // Uncounted read (no executeStats change).
+                            VstartNext = xc->tcBase()->readMiscRegNoEffect(
+                                MISCREG_VSTART);
 
                             xc->setMiscReg(MISCREG_PRV, status.spp);
                             status.sie = status.spie;
@@ -6311,6 +6390,9 @@ decode QUADRANT default Unknown::unknown() {
                             xc->setMiscReg(MISCREG_STATUS, status);
                             // TODO: is rvSext mandated by the spec?
                             NPC = rvSext(xc->readMiscReg(MISCREG_MEPC));
+                            // Uncounted read (no executeStats change).
+                            VstartNext = xc->tcBase()->readMiscRegNoEffect(
+                                MISCREG_VSTART);
                         }
                     }}, IsSerializeAfter, IsNonSpeculative, IsReturn);
                     0x38: mnret({{

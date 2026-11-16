@@ -190,6 +190,15 @@ protected:
     {
         this->flags[IsVector] = true;
     }
+
+  public:
+    /** The first element of a unit-stride memory micro-op (EEW from the
+     *  width field), the vstart its fault sets. */
+    uint32_t
+    memFirstElement() const
+    {
+        return microIdx * (vlen / width_EEW(machInst.width));
+    }
 };
 
 class VectorNopMicroInst : public RiscvMicroInst
@@ -328,6 +337,15 @@ class VectorMemMicroInst : public VectorMicroInst
 
 class VectorMemMacroInst : public VectorMacroInst
 {
+  public:
+    /**
+     * Restart at element vstart: the micro-ops
+     * whose elements all lie below vstart become no-ops, so that they send
+     * no request again. Only for a fresh instance (Decoder::armVstart).
+     * @return false if vstart is not the first element of a micro-op.
+     */
+    bool restartAt(uint32_t vstart);
+
   protected:
     const uint8_t veew;
     const uint32_t eew;

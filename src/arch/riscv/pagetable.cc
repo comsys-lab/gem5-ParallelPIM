@@ -30,6 +30,7 @@
 
 #include "arch/riscv/pagetable.hh"
 
+#include "base/bitfield.hh"
 #include "sim/serialize.hh"
 
 namespace gem5
@@ -47,6 +48,10 @@ TlbEntry::serialize(CheckpointOut &cp) const
     SERIALIZE_SCALAR(asid);
     SERIALIZE_SCALAR(pte);
     SERIALIZE_SCALAR(lruSeq);
+    // Written only when not Sv39, so that Sv39 checkpoints keep their
+    // contents; a missing value reads as Sv39.
+    if (xlateMode != SV39)
+        SERIALIZE_SCALAR(xlateMode);
 }
 
 void
@@ -58,6 +63,8 @@ TlbEntry::unserialize(CheckpointIn &cp)
     UNSERIALIZE_SCALAR(asid);
     UNSERIALIZE_SCALAR(pte);
     UNSERIALIZE_SCALAR(lruSeq);
+    if (!UNSERIALIZE_OPT_SCALAR(xlateMode))
+        xlateMode = SV39;
 }
 
 Addr
@@ -75,6 +82,26 @@ getVPNFromVAddr(Addr vaddr, Addr mode)
     default:
         panic("Unknown address translation mode %d\n", mode);
     }
+}
+
+unsigned
+vaddrBits(Addr mode)
+{
+    return mode == SV48 ? SV48_VADDR_BITS : SV39_VADDR_BITS;
+}
+
+unsigned
+pagingLevels(Addr mode)
+{
+    return mode == SV48 ? SV48_LEVELS : SV39_LEVELS;
+}
+
+bool
+isCanonical(Addr vaddr, Addr mode)
+{
+    const unsigned n = vaddrBits(mode);
+    const Addr msbs = bits(vaddr, 63, n - 1);
+    return msbs == 0 || msbs == mask(64 - n + 1);
 }
 
 } // namespace RiscvISA

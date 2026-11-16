@@ -315,6 +315,9 @@ class LSQ
 
         bool squashed() const override;
 
+        /** Squashed, or not the oldest instruction in the ROB. */
+        bool speculative() const override;
+
 
         /** Release the LSQRequest.
          * Notify the sender state that the request it points to is not valid

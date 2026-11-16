@@ -350,6 +350,14 @@ class BaseCache : public ClockedObject
     /** Miss status registers */
     MSHRQueue mshrQueue;
 
+    /**
+     * The PIM snoop diagnostic: count a PIM snoop that finds a valid
+     * block or a pending writeback, and stop, or warn and count, when a
+     * dirty copy would answer it.
+     */
+    void pimSnoopHit(const PacketPtr pkt, bool dirty_response,
+                     const char *where);
+
     /** Write/writeback buffer */
     WriteQueue writeBuffer;
 
@@ -961,6 +969,13 @@ class BaseCache : public ClockedObject
     const bool moveContractions;
 
     /**
+     * A PIM read that snoops a dirty copy here stops the run (true) or
+     * warns once and lets the copy answer (false). A PIM write always
+     * stops: the copy cannot pass on a modified line for a write.
+     */
+    const bool pimDirtyReadFatal;
+
+    /**
      * Bit vector of the blocking reasons for the access path.
      * @sa #BlockedCause
      */
@@ -1143,6 +1158,15 @@ class BaseCache : public ClockedObject
          * factor improved).
          */
         statistics::Scalar dataContractions;
+
+        /** PIM requests that found a valid block in this cache. */
+        statistics::Scalar pimValidBlk;
+        /** PIM requests that found a dirty block in this cache. */
+        statistics::Scalar pimDirtyBlk;
+        /** PIM snoops that found a valid block (or writeback) here. */
+        statistics::Scalar pimSnoopValidBlk;
+        /** PIM reads answered by a dirty copy here (if not fatal). */
+        statistics::Scalar pimDirtyPeerReads;
 
         /** Per-command statistics */
         std::vector<std::unique_ptr<CacheCmdStats>> cmd;

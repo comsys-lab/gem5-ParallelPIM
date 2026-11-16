@@ -28,3 +28,6 @@ configs/dram/lowp_sweep.cfg
 .vscode
 typings
 .DS_Store
+
+# Local run outputs of the PIM tests and smoke tests
+build_logs/

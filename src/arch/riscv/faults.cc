@@ -32,6 +32,7 @@
 #include "arch/riscv/faults.hh"
 
 #include "arch/riscv/insts/static_inst.hh"
+#include "arch/riscv/insts/vector.hh"
 #include "arch/riscv/isa.hh"
 #include "arch/riscv/mmu.hh"
 #include "arch/riscv/pmp.hh"
@@ -66,6 +67,16 @@ RiscvFault::invoke(ThreadContext *tc, const StaticInstPtr &inst)
              name(), exception(), pc_state);
 
     if (FullSystem) {
+        // A fault in a vector PIM micro-op sets vstart to the micro-op's
+        // first element; the instruction then restarts there (PIM
+        // instructions only; other vector instructions are unchanged).
+        if (!isInterrupt() && !isNonMaskableInterrupt() && inst &&
+            inst->isPim() && inst->isMicroop()) {
+            auto *micro = dynamic_cast<const VectorMicroInst *>(inst.get());
+            if (micro)
+                tc->setMiscReg(MISCREG_VSTART, micro->memFirstElement());
+        }
+
         PrivilegeMode pp = (PrivilegeMode)tc->readMiscReg(MISCREG_PRV);
         PrivilegeMode prv = PRV_M;
         MISA misa = tc->readMiscRegNoEffect(MISCREG_ISA);

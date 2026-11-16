@@ -91,6 +91,8 @@ class SEWorkload : public Workload
 
     Addr allocPhysPages(int npages, int pool_id=0);
     void deallocPhysPage(Addr paddr, int pool_id=0);
+    /** The pool a physical page belongs to, or -1 (MemPools::poolOf). */
+    int physPagePool(Addr paddr) const;
     Addr memSize(int pool_id=0) const;
     Addr freeMemSize(int pool_id=0) const;
 };

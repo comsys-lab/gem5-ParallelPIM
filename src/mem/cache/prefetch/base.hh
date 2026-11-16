@@ -49,6 +49,7 @@
 #include <cstdint>
 
 #include "arch/generic/tlb.hh"
+#include "base/addr_range.hh"
 #include "base/compiler.hh"
 #include "base/statistics.hh"
 #include "base/types.hh"
@@ -319,6 +320,9 @@ class Base : public ClockedObject
     /** Use Virtual Addresses for prefetching */
     const bool useVirtualAddresses;
 
+    /** Physical ranges the prefetcher neither trains on nor prefetches. */
+    const AddrRangeList excludedRanges;
+
     /**
      * Determine if this access should be observed
      * @param pkt The memory request causing the event
@@ -368,6 +372,9 @@ class Base : public ClockedObject
         /** The number of times a HW-prefetch is late
          * (hit in cache, MSHR, WB). */
         statistics::Formula pfLate;
+
+        /** Prefetches dropped because they fall in an excluded range. */
+        statistics::Scalar pfExcluded;
     } prefetchStats;
 
     /** Total prefetches issued */
@@ -432,6 +439,23 @@ class Base : public ClockedObject
     pfHitInWB()
     {
         prefetchStats.pfHitInWB++;
+    }
+
+    void
+    pfExcluded()
+    {
+        prefetchStats.pfExcluded++;
+    }
+
+    /** Whether a physical address lies in one of the excluded ranges. */
+    bool
+    isExcluded(Addr addr) const
+    {
+        for (const auto &r : excludedRanges) {
+            if (r.contains(addr))
+                return true;
+        }
+        return false;
     }
 
     /**

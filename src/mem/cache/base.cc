@@ -53,8 +53,10 @@
 #include "debug/CacheRepl.hh"
 #include "debug/CacheVerbose.hh"
 #include "debug/HWPrefetch.hh"
+#include "debug/PIM.hh"
 #include "mem/cache/compressors/base.hh"
 #include "mem/cache/mshr.hh"
+#include "mem/pim_op.hh"
 #include "mem/cache/mshr_queue.hh"
 #include "mem/cache/prefetch/base.hh"
 #include "mem/cache/queue_entry.hh"
@@ -109,6 +111,7 @@ BaseCache::BaseCache(const BaseCacheParams &p, unsigned blk_size)
       isReadOnly(p.is_read_only),
       replaceExpansions(p.replace_expansions),
       moveContractions(p.move_contractions),
+      pimDirtyReadFatal(p.pim_dirty_read_fatal),
       blocked(0),
       order(0),
       noTargetMSHR(nullptr),
@@ -957,7 +960,13 @@ BaseCache::getNextQueueEntry()
         PacketPtr pkt = prefetcher->getPacket();
         if (pkt) {
             Addr pf_addr = pkt->getBlockAddr(blkSize);
-            if (tags->findBlock({pf_addr, pkt->isSecure()})) {
+            if (prefetcher->isExcluded(pf_addr)) {
+                DPRINTF(HWPrefetch, "Prefetch %#x is in an excluded range, "
+                        "dropped.\n", pf_addr);
+                prefetcher->pfExcluded();
+                // free the request and packet
+                delete pkt;
+            } else if (tags->findBlock({pf_addr, pkt->isSecure()})) {
                 DPRINTF(HWPrefetch, "Prefetch %#x has hit in cache, "
                         "dropped.\n", pf_addr);
                 prefetcher->pfHitInCache();
@@ -990,6 +999,36 @@ BaseCache::getNextQueueEntry()
     }
 
     return nullptr;
+}
+
+void
+BaseCache::pimSnoopHit(const PacketPtr pkt, bool dirty_response,
+                       const char *where)
+{
+    assert(pkt->isPim());
+    stats.pimSnoopValidBlk++;
+    const char *op = pimOpName(pkt->req->getPimOp());
+    DPRINTF(PIM, "%s: PIM %s snoop for [%#x, %#x) found a %s %s\n", name(),
+            op, pkt->getAddr(), pkt->getAddr() + pkt->getSize(),
+            dirty_response ? "dirty" : "clean", where);
+    if (!dirty_response)
+        return;
+    // The copy would answer the request, so it never reaches the PIM
+    // memory.
+    fatal_if(pkt->isWrite(),
+             "PIM %s request for [%#x, %#x) found a dirty copy in %s; flush "
+             "the line with cbo.flush and fence before PIM",
+             op, pkt->getAddr(), pkt->getAddr() + pkt->getSize(), name());
+    stats.pimDirtyPeerReads++;
+    fatal_if(pimDirtyReadFatal,
+             "PIM %s request for [%#x, %#x) found a dirty copy in %s; flush "
+             "the line with cbo.flush and fence before PIM",
+             op, pkt->getAddr(), pkt->getAddr() + pkt->getSize(), name());
+    warn_once("PIM %s request for [%#x, %#x) found a dirty copy in %s; "
+              "flush the line with cbo.flush and fence before PIM. "
+              "The copy answers; further cases are counted in "
+              "pimDirtyPeerReads", op, pkt->getAddr(),
+              pkt->getAddr() + pkt->getSize(), name());
 }
 
 bool
@@ -2336,10 +2375,22 @@ BaseCache::CacheStats::CacheStats(BaseCache &c)
              "number of data expansions"),
     ADD_STAT(dataContractions, statistics::units::Count::get(),
              "number of data contractions"),
+    ADD_STAT(pimValidBlk, statistics::units::Count::get(),
+             "PIM requests that found a valid block"),
+    ADD_STAT(pimDirtyBlk, statistics::units::Count::get(),
+             "PIM requests that found a dirty block"),
+    ADD_STAT(pimSnoopValidBlk, statistics::units::Count::get(),
+             "PIM snoops that found a valid block or writeback"),
+    ADD_STAT(pimDirtyPeerReads, statistics::units::Count::get(),
+             "PIM reads answered by a dirty copy in this cache"),
     cmd(MemCmd::NUM_MEM_CMDS)
 {
     for (int idx = 0; idx < MemCmd::NUM_MEM_CMDS; ++idx)
         cmd[idx].reset(new CacheCmdStats(c, MemCmd(idx).toString()));
+    pimValidBlk.flags(statistics::nozero);
+    pimDirtyBlk.flags(statistics::nozero);
+    pimSnoopValidBlk.flags(statistics::nozero);
+    pimDirtyPeerReads.flags(statistics::nozero);
 }
 
 void

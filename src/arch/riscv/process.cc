@@ -103,6 +103,16 @@ RiscvProcess64::initState()
     for (ContextID ctx: contextIds) {
         auto *tc = system->threads[ctx];
         tc->setMiscRegNoEffect(MISCREG_PRV, PRV_U);
+        // Let user code flush and clean cache blocks (cbo.clean,
+        // cbo.flush; cbo.inval as a flush), as a PIM program must
+        // before and after PIM instructions, and zero them (cbo.zero),
+        // as Linux allows user code on a hart with Zicboz. Without these
+        // bits the instructions fault in U-mode.
+        SENVCFG senvcfg = 0;
+        senvcfg.cbcfe = 1;
+        senvcfg.cbie = 1;
+        senvcfg.cbze = 1;
+        tc->setMiscRegNoEffect(MISCREG_SENVCFG, senvcfg);
         auto *isa = dynamic_cast<ISA*>(tc->getIsaPtr());
         fatal_if(isa->rvType() != RV64, "RISC V CPU should run in 64 bits mode");
         MISA misa = tc->readMiscRegNoEffect(MISCREG_ISA);
@@ -121,6 +131,16 @@ RiscvProcess32::initState()
     for (ContextID ctx: contextIds) {
         auto *tc = system->threads[ctx];
         tc->setMiscRegNoEffect(MISCREG_PRV, PRV_U);
+        // Let user code flush and clean cache blocks (cbo.clean,
+        // cbo.flush; cbo.inval as a flush), as a PIM program must
+        // before and after PIM instructions, and zero them (cbo.zero),
+        // as Linux allows user code on a hart with Zicboz. Without these
+        // bits the instructions fault in U-mode.
+        SENVCFG senvcfg = 0;
+        senvcfg.cbcfe = 1;
+        senvcfg.cbie = 1;
+        senvcfg.cbze = 1;
+        tc->setMiscRegNoEffect(MISCREG_SENVCFG, senvcfg);
         auto *isa = dynamic_cast<ISA*>(tc->getIsaPtr());
         fatal_if(isa->rvType() != RV32, "RISC V CPU should run in 32 bits mode");
         MISA misa = tc->readMiscRegNoEffect(MISCREG_ISA);

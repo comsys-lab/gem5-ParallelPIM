@@ -28,6 +28,7 @@
  */
 
 #include "arch/riscv/decoder.hh"
+#include "arch/riscv/insts/vector.hh"
 #include "arch/riscv/insts/zcmt.hh"
 #include "arch/riscv/isa.hh"
 #include "arch/riscv/types.hh"
@@ -168,6 +169,24 @@ Decoder::decode(PCStateBase &_next_pc)
     emi.vill    = vtype.vill;
     emi.rv_type = static_cast<int>(next_pc.rvType());
     emi.enable_zcd = _enableZcd;
+
+    // A trap return to a vector PIM instruction that faulted carries
+    // vstart (mret, sret): that instruction restarts there, as a fresh
+    // instance whose micro-ops below vstart send nothing. The PC state
+    // carries it, as vl and vtype, so a fetch past the trap return without
+    // it is a misprediction (PCState::equals).
+    uint32_t vstart = next_pc.vstart();
+    if (GEM5_UNLIKELY(vstart != 0)) {
+        next_pc.vstart(0);
+        StaticInstPtr fresh = decodeInst(emi);
+        auto *macro = dynamic_cast<VectorMemMacroInst *>(fresh.get());
+        if (macro && fresh->isPim() && macro->restartAt(vstart)) {
+            fresh->size(compressed(emi) ? 2 : 4);
+            DPRINTF(Decode, "Decode: %s restarts at element %u\n",
+                    fresh->getName(), vstart);
+            return fresh;
+        }
+    }
 
     return decode(emi, next_pc.instAddr());
 }

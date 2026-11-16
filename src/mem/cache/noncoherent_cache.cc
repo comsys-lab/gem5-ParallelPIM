@@ -80,6 +80,11 @@ bool
 NoncoherentCache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
                          PacketList &writebacks)
 {
+    // A non-coherent cache has no uncacheable path and would cache the
+    // bytes of a processing-in-memory (PIM) request.
+    fatal_if(pkt->isPim(), "%s: a PIM request (%s) reached a non-coherent "
+             "cache, which would cache it", name(), pkt->cmdString());
+
     bool success = BaseCache::access(pkt, blk, lat, writebacks);
 
     if (pkt->isWriteback() || pkt->cmd == MemCmd::WriteClean) {

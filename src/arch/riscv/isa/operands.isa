@@ -116,4 +116,7 @@ def operands {{
         'bl', 'zcmtSecondFetch', (None, None, 'IsControl'), 13),
     'ZcmtPC': PCStateOp('ud', 'zcmtPc', (None, None, 'IsControl'), 13),
     'IsVset': PCStateOp('ub', 'new_vconf', (None, None, 'IsControl'), 13),
+    # vstart for the instruction a trap return goes to: a vector PIM
+    # instruction restarts there.
+    'VstartNext': PCStateOp('uw', 'vstart', (None, None, 'IsControl'), 13),
 }};

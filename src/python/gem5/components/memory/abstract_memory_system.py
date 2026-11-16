@@ -112,6 +112,21 @@ class AbstractMemorySystem(SubSystem):
         """
         raise NotImplementedError
 
+    def get_reserved_ranges(self) -> List[AddrRange]:
+        """Physical ranges of this memory system that the operating system
+        must not use, for example a processing-in-memory (PIM) memory. A
+        board leaves them out of the memory it describes to the OS (the
+        RISC-V device tree). Default: none."""
+        return []
+
+    def get_numa_nodes(self) -> List[Tuple[int, List[AddrRange]]]:
+        """Non-uniform memory access (NUMA) nodes of this memory system, as
+        (node id, physical ranges); the first node holds the board's
+        processors. A board describes each range with its node to the OS
+        (``numa-node-id`` in the RISC-V device tree), less the reserved
+        ranges. Default: none, so the board writes no node."""
+        return []
+
     @abstractmethod
     def get_uninterleaved_range(self) -> List[AddrRange]:
         """Returns the range of the memory system without interleaving.

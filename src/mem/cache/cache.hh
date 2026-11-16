@@ -73,6 +73,16 @@ class Cache : public BaseCache
     const bool doFastWrites;
 
     /**
+     * The latest ready time this cache gave a write that is both
+     * uncacheable and strictly ordered (PIM writes, PMA I/O writes). A
+     * later such write never becomes ready before it, so that the write
+     * buffer, which sends in ready-time order and keeps arrival order on
+     * ties, keeps them in arrival order (src/mem/request.hh: the memory
+     * system does not reorder these requests).
+     */
+    Tick lastStrictWriteReady = 0;
+
+    /**
      * Store the outstanding requests that we are expecting snoop
      * responses from so we can determine which snoop responses we
      * generated and which ones were merely forwarded.

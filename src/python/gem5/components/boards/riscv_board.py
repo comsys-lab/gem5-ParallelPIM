@@ -290,6 +290,14 @@ class RiscvBoard(
         self.mem_ranges = [AddrRange(start=0x80000000, size=mem_size)]
         memory.set_memory_range(self.mem_ranges)
 
+    def _os_memory_ranges(self) -> List[AddrRange]:
+        """The memory ranges the device tree describes: ``mem_ranges``
+        without the memory system's reserved ranges."""
+        reserved = self.get_memory().get_reserved_ranges()
+        if not reserved:
+            return self.mem_ranges
+        return [r for m in self.mem_ranges for r in m.exclude(reserved)]
+
     def generate_device_tree(self, outdir: str) -> None:
         """Creates the ``dtb`` and ``dts`` files.
 
@@ -304,7 +312,21 @@ class RiscvBoard(
         root.append(state.sizeCellsProperty())
         root.appendCompatible(["riscv-virtio"])
 
-        for mem_range in self.mem_ranges:
+        # NUMA nodes, when the memory system has them: each
+        # memory node and every CPU carries its numa-node-id; the CPUs are
+        # on the first node.
+        numa = self.get_memory().get_numa_nodes()
+        if numa:
+            reserved = self.get_memory().get_reserved_ranges()
+            mem_nodes = [
+                (r, nid)
+                for nid, ranges in numa
+                for m in ranges
+                for r in (m.exclude(reserved) if reserved else [m])
+            ]
+        else:
+            mem_nodes = [(r, None) for r in self._os_memory_ranges()]
+        for mem_range, nid in mem_nodes:
             node = FdtNode(f"memory@{int(mem_range.start):x}")
             node.append(FdtPropertyStrings("device_type", ["memory"]))
             node.append(
@@ -314,6 +336,8 @@ class RiscvBoard(
                     + state.sizeCells(mem_range.size()),
                 )
             )
+            if nid is not None:
+                node.append(FdtPropertyWords("numa-node-id", [nid]))
             root.append(node)
 
         node = FdtNode(f"chosen")
@@ -334,6 +358,8 @@ class RiscvBoard(
         for i, core in enumerate(self.get_processor().get_cores()):
             node = FdtNode(f"cpu@{i}")
             node.append(FdtPropertyStrings("device_type", "cpu"))
+            if numa:
+                node.append(FdtPropertyWords("numa-node-id", [numa[0][0]]))
             node.append(FdtPropertyWords("reg", state.CPUAddrCells(i)))
             node.append(FdtPropertyStrings("mmu-type", "riscv,sv48"))
             if core.core.isa[0].enable_Zicbom_fs.value:

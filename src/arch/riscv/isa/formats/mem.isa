@@ -252,13 +252,20 @@ def template CacheBlockBasedStoreExecute {{
         %(op_rd)s;
         %(ea_code)s;
 
+        // The senvcfg checks of the instruction (decoder.isa), which may
+        // add request flags (cbo.inval as a flush). Mem only gives the
+        // alignment flag (getAlignFlag); no data is written.
+        Request::Flags memFlags = memAccessFlags;
+        %(memacc_code)s;
+        (void)Mem;
+
         Addr cacheBlockSize = xc->tcBase()->getCpuPtr()->cacheLineSize();
         uint64_t numOffsetBits = floorLog2(cacheBlockSize);
         EA = (EA >> numOffsetBits) << numOffsetBits;
 
         {
             Fault fault =
-                writeMemAtomic(xc, nullptr, EA, cacheBlockSize, memAccessFlags,
+                writeMemAtomic(xc, nullptr, EA, cacheBlockSize, memFlags,
                     nullptr, std::vector<bool>(cacheBlockSize, true));
             if (fault != NoFault)
                 return fault;
@@ -279,13 +286,20 @@ def template CacheBlockBasedStoreInitiateAcc {{
         %(op_rd)s;
         %(ea_code)s;
 
+        // The senvcfg checks of the instruction (decoder.isa), which may
+        // add request flags (cbo.inval as a flush). Mem only gives the
+        // alignment flag (getAlignFlag); no data is written.
+        Request::Flags memFlags = memAccessFlags;
+        %(memacc_code)s;
+        (void)Mem;
+
         Addr cacheBlockSize = xc->tcBase()->getCpuPtr()->cacheLineSize();
         uint64_t numOffsetBits = floorLog2(cacheBlockSize);
         EA = (EA >> numOffsetBits) << numOffsetBits;
 
         {
             Fault fault =
-                writeMemTiming(xc, nullptr, EA, cacheBlockSize, memAccessFlags,
+                writeMemTiming(xc, nullptr, EA, cacheBlockSize, memFlags,
                     nullptr, std::vector<bool>(cacheBlockSize, true));
             if (fault != NoFault)
                 return fault;

@@ -149,6 +149,44 @@ class MemCmd
         HTMAbort,
         // Tlb shootdown
         TlbiExtSync,
+        // Processing-in-memory (PIM) requests, one pair per PimOp, in
+        // PimOp order (mem/pim_op.hh)
+        PimSbEwaddReq,
+        PimSbEwaddResp,
+        PimSbEwmulReq,
+        PimSbEwmulResp,
+        PimSbEwaddGbufReq,
+        PimSbEwaddGbufResp,
+        PimSbEwmulGbufReq,
+        PimSbEwmulGbufResp,
+        PimSbMacReq,
+        PimSbMacResp,
+        PimSbMovBkgbufReq,
+        PimSbMovBkgbufResp,
+        PimSbMovGbufbkReq,
+        PimSbMovGbufbkResp,
+        PimAbEwaddReq,
+        PimAbEwaddResp,
+        PimAbEwmulReq,
+        PimAbEwmulResp,
+        PimAbEwaddGbufReq,
+        PimAbEwaddGbufResp,
+        PimAbEwmulGbufReq,
+        PimAbEwmulGbufResp,
+        PimAbMacReq,
+        PimAbMacResp,
+        PimAbMovRegbkReq,
+        PimAbMovRegbkResp,
+        PimAbMovBkregReq,
+        PimAbMovBkregResp,
+        PimRdGbReq,
+        PimRdGbResp,
+        PimWrGbReq,
+        PimWrGbResp,
+        PimRdRegReq,
+        PimRdRegResp,
+        PimWrRegReq,
+        PimWrRegResp,
         NUM_MEM_CMDS
     };
 
@@ -177,6 +215,7 @@ class MemCmd
         IsPrint,        //!< Print state matching address (for debugging)
         IsFlush,        //!< Flush the address from caches
         FromCache,      //!< Request originated from a caching agent
+        IsPim,          //!< Processing-in-memory (PIM) request or response
         NUM_COMMAND_ATTRIBUTES
     };
 
@@ -209,8 +248,9 @@ class MemCmd
         {}
     };
 
-    /// Array to map Command enum to associated info.
-    static const CommandInfo commandInfo[];
+    /// Array to map Command enum to associated info. The bound makes a
+    /// definition with too many or too few rows a compile error.
+    static const CommandInfo commandInfo[NUM_MEM_CMDS];
 
   private:
 
@@ -257,6 +297,35 @@ class MemCmd
     bool isError() const        { return testCmdAttrib(IsError); }
     bool isPrint() const        { return testCmdAttrib(IsPrint); }
     bool isFlush() const        { return testCmdAttrib(IsFlush); }
+    bool isPim() const          { return testCmdAttrib(IsPim); }
+
+    /** Request command of a PIM operation (one pair per PimOp). */
+    static Command
+    pimReqCmd(PimOp op)
+    {
+        switch (op) {
+          case PimOp::SbEwadd: return PimSbEwaddReq;
+          case PimOp::SbEwmul: return PimSbEwmulReq;
+          case PimOp::SbEwaddGbuf: return PimSbEwaddGbufReq;
+          case PimOp::SbEwmulGbuf: return PimSbEwmulGbufReq;
+          case PimOp::SbMac: return PimSbMacReq;
+          case PimOp::SbMovBkgbuf: return PimSbMovBkgbufReq;
+          case PimOp::SbMovGbufbk: return PimSbMovGbufbkReq;
+          case PimOp::AbEwadd: return PimAbEwaddReq;
+          case PimOp::AbEwmul: return PimAbEwmulReq;
+          case PimOp::AbEwaddGbuf: return PimAbEwaddGbufReq;
+          case PimOp::AbEwmulGbuf: return PimAbEwmulGbufReq;
+          case PimOp::AbMac: return PimAbMacReq;
+          case PimOp::AbMovRegbk: return PimAbMovRegbkReq;
+          case PimOp::AbMovBkreg: return PimAbMovBkregReq;
+          case PimOp::RdGb: return PimRdGbReq;
+          case PimOp::WrGb: return PimWrGbReq;
+          case PimOp::RdReg: return PimRdRegReq;
+          case PimOp::WrReg: return PimWrRegReq;
+          case PimOp::None: break;
+        }
+        panic("Request is PIM but carries no PIM operation");
+    }
 
     bool
     isDemand() const
@@ -622,6 +691,7 @@ class Packet : public Printable, public Extensible<Packet>
     bool isError() const             { return cmd.isError(); }
     bool isPrint() const             { return cmd.isPrint(); }
     bool isFlush() const             { return cmd.isFlush(); }
+    bool isPim() const               { return cmd.isPim(); }
 
     bool isWholeLineWrite(unsigned blk_size)
     {
@@ -992,6 +1062,16 @@ class Packet : public Printable, public Extensible<Packet>
     static MemCmd
     makeReadCmd(const RequestPtr &req)
     {
+        if (req->isPim()) {
+            MemCmd cmd = MemCmd::pimReqCmd(req->getPimOp());
+            panic_if(!cmd.isRead() || !req->isUncacheable() ||
+                     !req->isStrictlyOrdered() || req->isLLSC() ||
+                     req->isPrefetch() || req->isLockedRMW() ||
+                     req->isHTMCmd(),
+                     "Malformed PIM read request (op %s)",
+                     pimOpName(req->getPimOp()));
+            return cmd;
+        }
         if (req->isHTMCmd()) {
             if (req->isHTMAbort())
                 return MemCmd::HTMAbort;
@@ -1015,6 +1095,17 @@ class Packet : public Printable, public Extensible<Packet>
     static MemCmd
     makeWriteCmd(const RequestPtr &req)
     {
+        if (req->isPim()) {
+            MemCmd cmd = MemCmd::pimReqCmd(req->getPimOp());
+            panic_if(!cmd.isWrite() || !req->isUncacheable() ||
+                     !req->isStrictlyOrdered() || req->isLLSC() ||
+                     req->isSwap() || req->isAtomic() ||
+                     req->isCacheMaintenance() || req->isLockedRMW() ||
+                     req->isMasked(),
+                     "Malformed PIM write request (op %s)",
+                     pimOpName(req->getPimOp()));
+            return cmd;
+        }
         if (req->isLLSC())
             return MemCmd::StoreCondReq;
         else if (req->isSwap() || req->isAtomic())
@@ -1398,6 +1489,11 @@ class Packet : public Printable, public Extensible<Packet>
     bool
     trySatisfyFunctional(PacketPtr other)
     {
+        // A PIM packet's payload is a command (descriptor or vector
+        // data), not memory data: never forward it, never overwrite it.
+        if (other->isPim()) {
+            return false;
+        }
         if (other->isMaskedWrite()) {
             // Do not forward data if overlapping with a masked write
             if (_isSecure == other->isSecure() &&

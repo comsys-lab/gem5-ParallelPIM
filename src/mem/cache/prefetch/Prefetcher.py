@@ -91,6 +91,12 @@ class BasePrefetcher(ClockedObject):
     page_bytes = Param.MemorySize(
         "4KiB", "Size of pages for virtual addresses"
     )
+    excluded_ranges = VectorParam.AddrRange(
+        [],
+        "Physical ranges that are invisible to the prefetcher: accesses "
+        "inside them do not train it, and prefetches into them are dropped "
+        "(for example a processing-in-memory region)",
+    )
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

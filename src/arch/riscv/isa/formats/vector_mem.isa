@@ -108,13 +108,27 @@ def VMemBase(name, Name, ea_code, memacc_code, mem_flags,
          'tail_mask_policy_code': getTailMaskPolicyCode()},
         inst_flags)
 
+    # The micro-op constructor templates set up registers by hand and do not
+    # expand %(constructor)s, so the explicitly passed memory flags and Is*
+    # flags go through their own key.
+    # Operand-derived flags are not added, so micro-ops without explicit
+    # flags generate exactly the code they did before.
+    micro_flags_code = ''
     if mem_flags:
-        mem_flags = [ '(Request::%s)' % flag for flag in mem_flags ]
-        s = '\n\tmemAccessFlags = ' + '|'.join(mem_flags) + ';'
-        microiop.constructor += s
+        micro_flags_code += '\n\tmemAccessFlags = ' + '|'.join(
+            '(Request::%s)' % flag for flag in mem_flags) + ';'
+    for flag in inst_flags:
+        if flag.startswith('Is'):
+            micro_flags_code += '\n\tflags[%s] = true;' % flag
+    microiop.micro_flags_code = micro_flags_code
 
     microDeclTemplate = eval(microop_template_base + 'Micro' + 'Declare')
     microConsTemplate = eval(microop_template_base + 'Micro' + 'Constructor')
+    if micro_flags_code and \
+            '%(micro_flags_code)s' not in microConsTemplate.template:
+        raise Exception('%s: %sMicroConstructor would drop the memory '
+                        'and instruction flags of its micro-ops' %
+                        (name, microop_template_base))
     microExecTemplate = eval(microop_template_base + 'Micro' + 'Execute')
     microInitTemplate = eval(microop_template_base + 'Micro' + 'InitiateAcc')
     microCompTemplate = eval(microop_template_base + 'Micro' + 'CompleteAcc')

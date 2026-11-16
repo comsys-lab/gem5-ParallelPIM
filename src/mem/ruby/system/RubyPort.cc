@@ -251,6 +251,12 @@ RubyPort::MemResponsePort::recvTimingReq(PacketPtr pkt)
     DPRINTF(RubyPort, "Timing request for address %#x on port %d\n",
             pkt->getAddr(), id);
 
+    // Ruby has no uncacheable path and would cache PIM data, which
+    // must never be cached.
+    fatal_if(pkt->isPim(),
+             "%s: a PIM request (%s) reached Ruby; PIM requests need the "
+             "classic cache hierarchy\n", owner.name(), pkt->cmdString());
+
     if (pkt->cacheResponding())
         panic("RubyPort should never see request with the "
               "cacheResponding flag set\n");
@@ -343,6 +349,12 @@ RubyPort::MemResponsePort::recvTimingReq(PacketPtr pkt)
 Tick
 RubyPort::MemResponsePort::recvAtomic(PacketPtr pkt)
 {
+    // Ruby has no uncacheable path and would cache PIM data, which
+    // must never be cached.
+    fatal_if(pkt->isPim(),
+             "%s: a PIM request (%s) reached Ruby; PIM requests need the "
+             "classic cache hierarchy\n", owner.name(), pkt->cmdString());
+
     // Only atomic_noncaching mode supported!
     if (!owner.system->bypassCaches()) {
         panic("Ruby supports atomic accesses only in noncaching mode\n");

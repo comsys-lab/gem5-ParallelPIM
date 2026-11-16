@@ -49,6 +49,7 @@
 #include "cpu/utils.hh"
 #include "debug/Activity.hh"
 #include "debug/MinorMem.hh"
+#include "sim/faults.hh"
 
 namespace gem5
 {
@@ -72,6 +73,13 @@ LSQ::LSQRequest::LSQRequest(LSQ &port_, MinorDynInstPtr inst_, bool isLoad_,
     state(NotIssued)
 {
     request = std::make_shared<Request>();
+}
+
+bool
+LSQ::LSQRequest::speculative() const
+{
+    return !port.execute.instIsRightStream(inst) ||
+        !port.execute.instIsHeadInst(inst);
 }
 
 void
@@ -1601,7 +1609,14 @@ LSQ::pushRequest(MinorDynInstPtr inst, bool isLoad, uint8_t *data,
         // accesses that cross cache-line boundaries, the cache needs to be
         // modified to support locking both cache lines to guarantee the
         // atomicity.
-        panic("Do not expect cross-cache-line atomic memory request\n");
+        // Execute may issue a memory instruction early, before older
+        // instructions commit, so this one may be on a mispredicted path
+        // and its address meaningless. Return a fault instead of stopping:
+        // Execute keeps it until the instruction commits, where it is
+        // raised, or discards it with the instruction.
+        DPRINTF(MinorMem, "Cross-cache-line atomic memory request: %s"
+                " addr: 0x%x size: %d\n", *inst, addr, size);
+        return std::make_shared<GenericAlignmentFault>(addr);
     }
 
     LSQRequestPtr request;

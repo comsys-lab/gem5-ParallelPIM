@@ -47,6 +47,7 @@
 #include "base/str.hh"
 #include "base/trace.hh"
 #include "cpu/thread_context.hh"
+#include "debug/PIM.hh"
 #include "debug/TLB.hh"
 #include "debug/TLBVerbose.hh"
 #include "mem/page_table.hh"
@@ -205,10 +206,18 @@ TLB::demapPage(Addr vaddr, uint64_t asid)
         flushAll();
     } else {
         if (vaddr != 0 && asid != 0) {
-            // TODO: When supporting other address translation modes, fix this
+            // The TLB does not know the hart's satp mode here, so remove
+            // the entry under the Sv39 key and an Sv48 entry under the
+            // Sv48 key. With Sv39 only, the second lookup never finds an
+            // entry the first did not.
             Addr vpn = getVPNFromVAddr(vaddr, AddrXlateMode::SV39);
             TlbEntry *entry = lookup(vpn, asid, BaseMMU::Read, true);
             if (entry) {
+                remove(entry - tlb.data());
+            }
+            vpn = getVPNFromVAddr(vaddr, AddrXlateMode::SV48);
+            entry = lookup(vpn, asid, BaseMMU::Read, true);
+            if (entry && entry->xlateMode == AddrXlateMode::SV48) {
                 remove(entry - tlb.data());
             }
         }
@@ -352,11 +361,24 @@ TLB::doTranslate(const RequestPtr &req, ThreadContext *tc,
         tc->readMiscReg(MISCREG_VSATP) :
         tc->readMiscReg(MISCREG_SATP);
 
+    // A non-canonical address page-faults before the TLB lookup, which
+    // would otherwise hit the entry of its truncated VPN. With vsatp
+    // Bare (G-stage only) the address is a guest physical address.
+    if (!(memaccess.virt && satp.mode == AddrXlateMode::BARE) &&
+        !isCanonical(vaddr, satp.mode)) {
+        return createPagefault(vaddr, mode, 0, false, memaccess.virt);
+    }
+
     Addr vpn = getVPNFromVAddr(vaddr, satp.mode);
 
     TlbEntry *e = nullptr;
     if (!memaccess.bypassTLB()) {
         e = lookup(vpn, satp.asid, mode, false);
+        if (req->isPim()) {
+            stats.pimAccesses++;
+            if (!e)
+                stats.pimMisses++;
+        }
         if (!e) {
             Fault fault = walker->start(tc, translation, req, mode);
             // Atomic translations have translation == nullptr
@@ -578,6 +600,8 @@ TLB::translate(const RequestPtr &req, ThreadContext *tc,
         if (!delayed && fault == NoFault) {
             fault = pma->check(req, mode);
         }
+        if (!delayed)
+            tracePim(req, mode, fault, false);
         return fault;
     } else {
         // In the O3 CPU model, sometimes a memory access will be speculatively
@@ -588,8 +612,12 @@ TLB::translate(const RequestPtr &req, ThreadContext *tc,
         // length is long enough to wrap around from the end of the memory to
         // the start.
         assert(req->getSize() > 0);
-        if (req->getVaddr() + req->getSize() - 1 < req->getVaddr())
-            return std::make_shared<GenericPageTableFault>(req->getVaddr());
+        if (req->getVaddr() + req->getSize() - 1 < req->getVaddr()) {
+            Fault fault =
+                std::make_shared<GenericPageTableFault>(req->getVaddr());
+            tracePim(req, mode, fault, false);
+            return fault;
+        }
 
         Process * p = tc->getProcessPtr();
 
@@ -601,13 +629,33 @@ TLB::translate(const RequestPtr &req, ThreadContext *tc,
         Addr vaddr = getValidAddr(req->getVaddr(), tc, mode);
         Addr paddr;
 
-        if (!p->pTable->translate(vaddr, paddr))
-            return std::make_shared<GenericPageTableFault>(req->getVaddr());
+        if (!p->pTable->translate(vaddr, paddr)) {
+            Fault fault =
+                std::make_shared<GenericPageTableFault>(req->getVaddr());
+            tracePim(req, mode, fault, false);
+            return fault;
+        }
 
         req->setPaddr(paddr);
 
+        tracePim(req, mode, NoFault, false);
         return NoFault;
     }
+}
+
+void
+TLB::tracePim(const RequestPtr &req, BaseMMU::Mode mode, const Fault &fault,
+              bool walk) const
+{
+    if (!req->isPim())
+        return;
+    DPRINTF(PIM, "PIM %s %s va=%#x pa=%s size=%d flags=PIM%s%s fault=%s%s\n",
+            pimOpName(req->getPimOp()), mode == BaseMMU::Write ? "W" : "R",
+            req->getVaddr(),
+            req->hasPaddr() ? csprintf("%#x", req->getPaddr()) : "-",
+            req->getSize(), req->isUncacheable() ? " UC" : "",
+            req->isStrictlyOrdered() ? " SO" : "",
+            fault == NoFault ? "none" : fault->name(), walk ? " walk" : "");
 }
 
 Fault
@@ -721,8 +769,7 @@ TLB::unserialize(CheckpointIn &cp)
         freeList.pop_front();
 
         newEntry->unserializeSection(cp, csprintf("Entry%d", x));
-        // TODO: When supporting other addressing modes fix this
-        Addr vpn = getVPNFromVAddr(newEntry->vaddr, AddrXlateMode::SV39);
+        Addr vpn = getVPNFromVAddr(newEntry->vaddr, newEntry->xlateMode);
         Addr key = buildKey(vpn, newEntry->asid);
         newEntry->trieHandle = trie.insert(key,
             TlbEntryTrie::MaxBits - newEntry->logBytes + PageShift, newEntry);
@@ -737,6 +784,10 @@ TLB::TlbStats::TlbStats(statistics::Group *parent)
     ADD_STAT(writeHits, statistics::units::Count::get(), "write hits"),
     ADD_STAT(writeMisses, statistics::units::Count::get(), "write misses"),
     ADD_STAT(writeAccesses, statistics::units::Count::get(), "write accesses"),
+    ADD_STAT(pimAccesses, statistics::units::Count::get(),
+             "TLB lookups of processing-in-memory (PIM) requests"),
+    ADD_STAT(pimMisses, statistics::units::Count::get(),
+             "TLB misses of processing-in-memory (PIM) requests"),
     ADD_STAT(hits, statistics::units::Count::get(),
              "Total TLB (read and write) hits", readHits + writeHits),
     ADD_STAT(misses, statistics::units::Count::get(),
@@ -745,6 +796,8 @@ TLB::TlbStats::TlbStats(statistics::Group *parent)
              "Total TLB (read and write) accesses",
              readAccesses + writeAccesses)
 {
+    pimAccesses.flags(statistics::nozero);
+    pimMisses.flags(statistics::nozero);
 }
 
 Port *

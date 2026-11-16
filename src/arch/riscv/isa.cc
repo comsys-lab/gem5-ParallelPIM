@@ -303,7 +303,7 @@ ISA::ISA(const Params &p) : BaseISA(p, "riscv"),
     _rvType(p.riscv_type), enableRvv(p.enable_rvv), vlen(p.vlen), elen(p.elen),
     _privilegeModeSet(p.privilege_mode_set),
     _wfiResumeOnPending(p.wfi_resume_on_pending), _enableZcd(p.enable_Zcd),
-    _enableSmrnmi(p.enable_Smrnmi)
+    _enableSmrnmi(p.enable_Smrnmi), _maxPagingMode(p.max_paging_mode)
 {
     _regClasses.push_back(&intRegClass);
     _regClasses.push_back(&floatRegClass);
@@ -323,6 +323,20 @@ ISA::ISA(const Params &p) : BaseISA(p, "riscv"),
 
     miscRegFile.resize(NUM_PHYS_MISCREGS);
     clear();
+}
+
+bool
+ISA::satpModeSupported(uint64_t mode) const
+{
+    switch (mode) {
+      case AddrXlateMode::BARE:
+      case AddrXlateMode::SV39:
+        return true;
+      case AddrXlateMode::SV48:
+        return _maxPagingMode == enums::sv48;
+      default:
+        return false;
+    }
 }
 
 bool ISA::inUserMode() const
@@ -799,12 +813,12 @@ ISA::setMiscReg(RegIndex idx, RegVal val)
             break;
           case MISCREG_SATP:
             {
-                // we only support bare and Sv39 mode; setting a different mode
-                // shall have no effect (see 4.1.12 in priv ISA manual)
+                // we support bare, Sv39 and, with max_paging_mode sv48,
+                // Sv48; setting a different mode shall have no effect
+                // (see 4.1.12 in priv ISA manual)
                 SATP cur_val = readMiscRegNoEffect(idx);
                 SATP new_val = val;
-                if (new_val.mode != AddrXlateMode::BARE &&
-                    new_val.mode != AddrXlateMode::SV39)
+                if (!satpModeSupported(new_val.mode))
                     new_val.mode = cur_val.mode;
 
                 // TLB flush can be elided here

@@ -358,7 +358,13 @@ Process::deallocateMem(Addr vaddr, int64_t size)
         const Addr page_vaddr = page_vbase + page_size * i;
         Addr page_paddr;
         if (pTable->translate(page_vaddr, page_paddr)) {
-            if (zeroPages) {
+            // Only frames of a memory pool came from the page allocator.
+            // Other frames were mapped by an emulated driver (for
+            // example PimMemDriver's /dev/mem): unmapping them leaves the
+            // memory as it is, as Linux does, and returns nothing to a
+            // pool.
+            const int pool_id = seWorkload->physPagePool(page_paddr);
+            if (zeroPages && pool_id >= 0) {
                 // Zero out the physical page upon deallocation.
                 // Pages that have never been allocated before are already
                 // zero-filled. Zeroing out deallocated pages ensures that
@@ -377,7 +383,8 @@ Process::deallocateMem(Addr vaddr, int64_t size)
             pTable->unmap(page_vaddr, page_size);
 
             // Deallocate the physical page.
-            seWorkload->deallocPhysPage(page_paddr);
+            if (pool_id >= 0)
+                seWorkload->deallocPhysPage(page_paddr, pool_id);
         }
     }
 }

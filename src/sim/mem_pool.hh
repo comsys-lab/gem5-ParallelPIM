@@ -74,6 +74,9 @@ class MemPool : public Serializable
     Addr freeBytes() const;
     Addr totalBytes() const;
 
+    /** Whether the page holding an address belongs to this pool. */
+    bool contains(Addr addr) const;
+
     Addr allocate(Addr npages);
     void deallocate(Addr start, Addr npages);
 
@@ -100,6 +103,13 @@ class MemPools : public Serializable
     /// Deallocate physical pages. These may be reallocated by
     /// allocPhysPages later on.
     void deallocPhysPages(Addr page_addr, int npages, int pool_id=0);
+
+    /**
+     * The pool a physical page belongs to, or -1 when it belongs to none
+     * (for example memory an emulated driver maps, which the pools never
+     * hand out).
+     */
+    int poolOf(Addr page_addr) const;
 
     /** Amount of physical memory that exists in a pool. */
     Addr memSize(int pool_id=0) const;

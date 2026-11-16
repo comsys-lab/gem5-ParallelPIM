@@ -44,6 +44,7 @@
 #include "arch/riscv/regs/misc.hh"
 #include "arch/riscv/types.hh"
 #include "base/types.hh"
+#include "enums/RiscvPagingMode.hh"
 
 namespace gem5
 {
@@ -124,6 +125,12 @@ class ISA : public BaseISA
      * Set true to make NMI recoverable
      */
     bool _enableSmrnmi;
+
+    /**
+     * The largest virtual-memory scheme that satp accepts (Sv39 or
+     * Sv48). vsatp and hgatp accept only Sv39 and Sv39x4.
+     */
+    const enums::RiscvPagingMode _maxPagingMode;
 
   public:
     using Params = RiscvISAParams;
@@ -209,6 +216,11 @@ class ISA : public BaseISA
     bool enableZcd() { return _enableZcd; }
 
     bool enableSmrnmi() { return _enableSmrnmi; }
+
+    enums::RiscvPagingMode maxPagingMode() const { return _maxPagingMode; }
+
+    /** Whether satp accepts this MODE field (Bare, Sv39, maybe Sv48). */
+    bool satpModeSupported(uint64_t mode) const;
 
     virtual Addr getFaultHandlerAddr(
         RegIndex idx, uint64_t cause, bool intr) const;

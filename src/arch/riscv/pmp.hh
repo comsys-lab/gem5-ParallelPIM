@@ -128,6 +128,13 @@ class PMP : public SimObject
 
   public:
     /**
+     * Continue with another PMP unit's entries: the PMP registers are
+     * the hart's state, which a CPU switch keeps (MMU::takeOverFrom).
+     * @param old the PMP unit of the switched-out CPU.
+     */
+    void takeOverFrom(PMP *old);
+
+    /**
      * pmpCheck checks if a particular memory access
      * is allowed based on the pmp rules.
      * @param req memory request.

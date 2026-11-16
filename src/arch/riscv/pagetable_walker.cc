@@ -222,7 +222,8 @@ Walker::WalkerState::initState(ThreadContext * _tc,
     // TODO move this somewhere else
     // VSATP mode might be bare, but we still
     // will have to go through G-stage
-    // assert(satp.mode == AddrXlateMode::SV39);
+    // satp.mode is Bare, Sv39 or Sv48; vsatp.mode is Bare or Sv39
+    // (ISA::setMiscReg)
 
     // If functional entry.vaddr will be set
     // in start functional (req == NULL)
@@ -231,6 +232,7 @@ Walker::WalkerState::initState(ThreadContext * _tc,
         req->getVaddr();
 
     entry.asid = satp.asid;
+    entry.xlateMode = satp.mode;
 }
 
 void
@@ -240,7 +242,8 @@ Walker::startWalkWrapper()
     WalkerState *currState = currStates.front();
 
     // check if we get a tlb hit to skip the walk
-    Addr vaddr = Addr(sext<SV39_VADDR_BITS>(currState->req->getVaddr()));
+    Addr vaddr = Addr(sext(currState->req->getVaddr(),
+                           vaddrBits(currState->satp.mode)));
     Addr vpn = getVPNFromVAddr(vaddr, currState->satp.mode);
     TlbEntry *e = tlb->lookup(vpn, currState->satp.asid, currState->mode,
                               true);
@@ -280,7 +283,8 @@ Walker::startWalkWrapper()
         // check the next translation request, if it exists
         if (currStates.size()) {
             currState = currStates.front();
-            vaddr = Addr(sext<SV39_VADDR_BITS>(currState->req->getVaddr()));
+            vaddr = Addr(sext(currState->req->getVaddr(),
+                              vaddrBits(currState->satp.mode)));
             Addr vpn = getVPNFromVAddr(vaddr, currState->satp.mode);
             e = tlb->lookup(vpn, currState->satp.asid, currState->mode,
                             true);
@@ -435,16 +439,14 @@ Walker::WalkerState::walkOneStage(Addr vaddr)
 
     curstage = XlateStage::FIRST_STAGE;
 
-    // Make sure MSBS are the same
-    // riscv-privileged-20211203 page 84
-    auto mask_for_msbs = mask(64 - SV39_VADDR_BITS);
-    auto msbs = bits(vaddr, 63, SV39_VADDR_BITS);
-    if (msbs != 0 && msbs != mask_for_msbs) {
+    // Bits 63 down to the top virtual-address bit must be equal
+    // (riscv-privileged-20211203, sections 4.4.1 and 4.5.1)
+    if (!isCanonical(vaddr, satp.mode)) {
         return pageFault();
     }
 
     Addr pte_addr = setupWalk(vaddr);
-    level = SV39_LEVELS - 1;
+    level = pagingLevels(satp.mode) - 1;
     // Create physical request for first_pte_addr
     // This is a host physical address
     // In two-stage this gets discarded?
@@ -500,16 +502,14 @@ Walker::WalkerState::walkTwoStage(Addr vaddr)
 {
     curstage = XlateStage::FIRST_STAGE;
 
-    // Make sure MSBS are the same
-    // riscv-privileged-20211203 page 84
-    auto mask_for_msbs = mask(64 - SV39_VADDR_BITS);
-    auto msbs = bits(vaddr, 63, SV39_VADDR_BITS);
-    if (msbs != 0 && msbs != mask_for_msbs) {
+    // Bits 63 down to the top virtual-address bit must be equal
+    // (riscv-privileged-20211203, sections 4.4.1 and 4.5.1)
+    if (!isCanonical(vaddr, satp.mode)) {
         return pageFault();
     }
 
     Addr pte_addr = setupWalk(vaddr);
-    level = SV39_LEVELS - 1;
+    level = pagingLevels(satp.mode) - 1;
     // Create physical request for first_pte_addr
     // This is a host physical address
     // In two-stage this gets discarded?
@@ -655,7 +655,7 @@ Walker::WalkerState::startFunctional(Addr &addr, unsigned &logBytes)
 
 Fault
 Walker::WalkerState::checkPTEPermissions(
-    PTESv39 pte, WalkFlags& stepWalkFlags, int level)
+    PTESv39 &pte, WalkFlags& stepWalkFlags, int level)
 {
     // If valid bit is off OR
     // the page is writable but not readable, throw pf
@@ -677,13 +677,9 @@ Walker::WalkerState::checkPTEPermissions(
         }
 
         // ppn fragments that correspond to unused
-        // vpn fragments have to be all zeroes
+        // vpn fragments (PPN[level-1:0]) have to be all zeroes
         // Otherwise, throw a pagefault
-        if (level >= 1 && pte.ppn0 != 0)
-        {
-            return pageFault();
-        }
-        else if (level == 2 && pte.ppn1 != 0)
+        if ((pte.ppn & mask(level * SV39_LEVEL_BITS)) != 0)
         {
             return pageFault();
         }
@@ -700,9 +696,15 @@ Walker::WalkerState::checkPTEPermissions(
             pte.a = 1;
             stepWalkFlags.doWrite = true;
         }
+        // D only for a store that will commit: a speculative store
+        // re-executes from commit instead, so D-bit updates are exact.
         if (!pte.d && mode == BaseMMU::Write) {
-            pte.d = 1;
-            stepWalkFlags.doWrite = true;
+            if (!functional && translation && translation->speculative()) {
+                stepWalkFlags.dirtyAssist = true;
+            } else {
+                pte.d = 1;
+                stepWalkFlags.doWrite = true;
+            }
         }
     }
 
@@ -789,7 +791,7 @@ Walker::WalkerState::stepWalk(PacketPtr &write)
                     // put it non-writable into the TLB to detect
                     // writes and redo the page table walk in order
                     // to update the dirty flag
-                    if (!pte.d && mode != BaseMMU::Write)
+                    if (!pte.d)
                         entry.pte.w = 0;
 
                     // Don't do TLB insert here when ending TwoStage.
@@ -840,7 +842,7 @@ Walker::WalkerState::stepWalk(PacketPtr &write)
         // value back to memory. Use a fresh packet so any responder flags set
         // during the read do not leak into the write request.
         PacketPtr new_write = nullptr;
-        if (!functional && stepWalkFlags.doWrite &&
+        if (!functional && fault == NoFault && stepWalkFlags.doWrite &&
             !(walkType == TwoStage && curstage == FIRST_STAGE))
         {
             new_write = new Packet(oldRead, true, true);
@@ -873,6 +875,12 @@ Walker::WalkerState::stepWalk(PacketPtr &write)
 
         read = new Packet(request, MemCmd::ReadReq);
         read->allocate();
+    }
+
+    if (fault == NoFault && stepWalkFlags.dirtyAssist) {
+        DPRINTF(PageTableWalker, "Speculative store, D = 0: dirty-bit "
+                "assist for %#x\n", entry.vaddr);
+        fault = std::make_shared<DirtyBitAssist>();
     }
 
     return fault;
@@ -951,7 +959,7 @@ Walker::WalkerState::stepWalkGStage(PacketPtr &write)
                     // put it non-writable into the TLB to detect
                     // writes and redo the page table walk in order
                     // to update the dirty flag.
-                    if (!pte.d && mode != BaseMMU::Write)
+                    if (!pte.d)
                         entry.pte.w = 0;
 
                     // Also don't do TLB inserts on special_access
@@ -1010,7 +1018,7 @@ Walker::WalkerState::stepWalkGStage(PacketPtr &write)
         // value back to memory. Use a fresh packet so responder state from
         // the read does not carry into the write request.
         PacketPtr new_write = nullptr;
-        if (!functional && stepWalkFlags.doWrite)
+        if (!functional && fault == NoFault && stepWalkFlags.doWrite)
         {
             new_write = new Packet(oldRead, true, true);
             if (oldRead->hasSharers()) {
@@ -1048,6 +1056,12 @@ Walker::WalkerState::stepWalkGStage(PacketPtr &write)
         read->allocate();
     }
 
+    if (fault == NoFault && stepWalkFlags.dirtyAssist) {
+        DPRINTF(PageTableWalker, "Speculative store, D = 0: dirty-bit "
+                "assist for %#x\n", entry.vaddr);
+        fault = std::make_shared<DirtyBitAssist>();
+    }
+
     return fault;
 }
 
@@ -1067,8 +1081,8 @@ Walker::WalkerState::setupWalk(Addr vaddr)
     Addr pte_addr;
 
     if (curstage == FIRST_STAGE) {
-        //vaddr = Addr(sext<SV39_VADDR_BITS>(vaddr));
-        shift = PageShift + SV39_LEVEL_BITS * 2;
+        // Sv39 and Sv48 have 9-bit levels; the top one indexes the root
+        shift = PageShift + SV39_LEVEL_BITS * (pagingLevels(satp.mode) - 1);
         idx = (vaddr >> shift) & mask(SV39_LEVEL_BITS);
         pte_addr = (satp.ppn << PageShift) + (idx * sizeof(PTESv39));
 
@@ -1137,7 +1151,7 @@ Walker::WalkerState::recvPacket(PacketPtr pkt)
              * well.
              */
             Addr vaddr = req->getVaddr();
-            vaddr = Addr(sext<SV39_VADDR_BITS>(vaddr));
+            vaddr = Addr(sext(vaddr, vaddrBits(satp.mode)));
             Addr paddr = walker->tlb->hiddenTranslateWithTLB(vaddr, satp.asid,
                                                              satp.mode, mode);
 
@@ -1153,9 +1167,11 @@ Walker::WalkerState::recvPacket(PacketPtr pkt)
             }
 
             // Let the CPU continue.
+            walker->tlb->tracePim(req, mode, timingFault, true);
             translation->finish(timingFault, req, tc, mode);
         } else {
             // There was a fault during the walk. Let the CPU know.
+            walker->tlb->tracePim(req, mode, timingFault, true);
             translation->finish(timingFault, req, tc, mode);
         }
         return true;

@@ -92,6 +92,13 @@ MemPool::totalBytes() const
     return totalPages() << pageShift;
 }
 
+bool
+MemPool::contains(Addr addr) const
+{
+    const Addr page = addr >> pageShift;
+    return page >= startPageNum && page < startPageNum + _totalPages;
+}
+
 Addr
 MemPool::allocate(Addr npages)
 {
@@ -169,6 +176,16 @@ void
 MemPools::deallocPhysPages(Addr page_addr, int npages, int pool_id)
 {
     pools[pool_id].deallocate(page_addr, npages);
+}
+
+int
+MemPools::poolOf(Addr page_addr) const
+{
+    for (int i = 0; i < int(pools.size()); i++) {
+        if (pools[i].contains(page_addr))
+            return i;
+    }
+    return -1;
 }
 
 Addr

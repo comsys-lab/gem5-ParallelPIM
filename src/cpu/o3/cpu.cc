@@ -1503,5 +1503,12 @@ CPU::htmSendAbortSignal(ThreadID tid, uint64_t htm_uid,
     }
 }
 
+bool
+CPU::isOldestInst(const DynInstPtr &inst)
+{
+    ThreadID tid = inst->threadNumber;
+    return !rob.isEmpty(tid) && rob.readHeadInst(tid)->seqNum == inst->seqNum;
+}
+
 } // namespace o3
 } // namespace gem5

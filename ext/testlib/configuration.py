@@ -253,6 +253,9 @@ def define_constants(constants):
     constants.power_tag = "POWER"
     constants.null_tag = "NULL"
     constants.all_compiled_tag = "ALL"
+    # RISC-V with Ramulator 2.1 (build_opts/RISCV_RAMULATOR2); like
+    # VEGA_X86, it names a build configuration, not an ISA.
+    constants.riscv_ramulator2_tag = "RISCV_RAMULATOR2"
     constants.null_all_ruby = "NULL_All_Ruby"
 
     # Need this build in order to run the fs/linux/arm testlib tests.
@@ -286,6 +289,7 @@ def define_constants(constants):
             constants.power_tag,
             constants.null_tag,
             constants.all_compiled_tag,
+            constants.riscv_ramulator2_tag,
         ),
         constants.variant_tag_type: (
             constants.opt_tag,
@@ -318,6 +322,7 @@ def define_constants(constants):
             constants.host_x86_64_tag,
             constants.host_arm_tag,
         ),
+        constants.riscv_ramulator2_tag: (constants.host_x86_64_tag,),
     }
 
     constants.supported_isas = constants.supported_tags["isa"]

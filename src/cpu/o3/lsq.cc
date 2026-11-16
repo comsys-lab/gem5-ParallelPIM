@@ -1074,6 +1074,12 @@ LSQ::LSQRequest::install()
 
 bool LSQ::LSQRequest::squashed() const { return _inst->isSquashed(); }
 
+bool
+LSQ::LSQRequest::speculative() const
+{
+    return _inst->isSquashed() || !_inst->cpu->isOldestInst(_inst);
+}
+
 void
 LSQ::LSQRequest::addReq(Addr addr, unsigned size,
            const std::vector<bool>& byte_enable)

@@ -83,6 +83,12 @@ SEWorkload::deallocPhysPage(Addr paddr, int pool_id)
     memPools.deallocPhysPages(paddr, 1, pool_id);
 }
 
+int
+SEWorkload::physPagePool(Addr paddr) const
+{
+    return memPools.poolOf(paddr);
+}
+
 Addr
 SEWorkload::memSize(int pool_id) const
 {

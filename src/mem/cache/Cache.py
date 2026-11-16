@@ -128,6 +128,12 @@ class BaseCache(ClockedObject):
         True, "Try to co-allocate blocks that contract"
     )
 
+    pim_dirty_read_fatal = Param.Bool(
+        True,
+        "A processing-in-memory (PIM) read that finds a dirty copy in this "
+        "cache is fatal (False: warn once and let the copy answer)",
+    )
+
     sequential_access = Param.Bool(
         False, "Whether to access tags and data sequentially"
     )

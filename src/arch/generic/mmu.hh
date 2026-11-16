@@ -82,6 +82,15 @@ class BaseMMU : public SimObject
          * squashed?
          */
         virtual bool squashed() const { return false; }
+
+        /** Whether the instruction that requested this translation may
+         * still be squashed: an older instruction has not committed yet
+         * (a CPU model that translates out of order or ahead of
+         * resolved branches). The RISC-V page-table walker sets a PTE's
+         * dirty bit only for a translation that is not speculative.
+         * @return May the requesting instruction still be squashed?
+         */
+        virtual bool speculative() const { return false; }
     };
 
   protected:

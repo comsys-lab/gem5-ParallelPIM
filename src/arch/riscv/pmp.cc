@@ -120,6 +120,16 @@ PMP::pmpCheck(const RequestPtr &req, BaseMMU::Mode mode,
     return createDefaultFault(req, mode, pmode, vaddr);
 }
 
+void
+PMP::takeOverFrom(PMP *old)
+{
+    fatal_if(old->pmpEntries != pmpEntries,
+             "PMP takeover between units of %d and %d entries",
+             old->pmpEntries, pmpEntries);
+    pmpTable = old->pmpTable;
+    numRules = old->numRules;
+}
+
 Fault
 PMP::createAddrfault(Addr vaddr, BaseMMU::Mode mode)
 {

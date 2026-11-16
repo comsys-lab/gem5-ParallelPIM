@@ -207,6 +207,10 @@ class LSQ : public Named
 
         virtual ~LSQRequest();
 
+        /** On the wrong stream, or not the oldest in-flight instruction
+         *  (an older branch may still change the stream). */
+        bool speculative() const override;
+
       public:
         /** Make a packet to use with the memory transaction */
         void makePacket();

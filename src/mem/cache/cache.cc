@@ -46,6 +46,7 @@
 
 #include "mem/cache/cache.hh"
 
+#include <algorithm>
 #include <cassert>
 
 #include "base/compiler.hh"
@@ -55,12 +56,14 @@
 #include "debug/Cache.hh"
 #include "debug/CacheTags.hh"
 #include "debug/CacheVerbose.hh"
+#include "debug/PIM.hh"
 #include "enums/Clusivity.hh"
 #include "mem/cache/cache_blk.hh"
 #include "mem/cache/compressors/base.hh"
 #include "mem/cache/mshr.hh"
 #include "mem/cache/tags/base.hh"
 #include "mem/cache/write_queue_entry.hh"
+#include "mem/pim_op.hh"
 #include "mem/request.hh"
 #include "params/Cache.hh"
 
@@ -175,6 +178,17 @@ Cache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
         // flush and invalidate any existing block
         CacheBlk *old_blk(tags->findBlock({pkt->getAddr(), pkt->isSecure()}));
         if (old_blk && old_blk->isValid()) {
+            if (pkt->isPim()) {
+                // The issuing core's own copy: not an error, its
+                // writeback is ordered before the PIM request.
+                const bool dirty = old_blk->isSet(CacheBlk::DirtyBit);
+                stats.pimValidBlk++;
+                if (dirty)
+                    stats.pimDirtyBlk++;
+                DPRINTF(PIM, "%s: PIM %s for %#x evicts a %s block\n",
+                        name(), pimOpName(pkt->req->getPimOp()),
+                        pkt->getAddr(), dirty ? "dirty" : "clean");
+            }
             BaseCache::evictBlock(old_blk, writebacks);
         }
 
@@ -338,6 +352,29 @@ Cache::handleTimingReqMiss(PacketPtr pkt, CacheBlk *blk, Tick forward_time,
         stats.cmdStats(pkt).mshrUncacheable[pkt->req->requestorId()]++;
 
         if (pkt->isWrite()) {
+            // Strictly ordered uncacheable writes keep their arrival
+            // order: none may become ready before an earlier one,
+            // whatever delay that one got below.
+            const bool strict = pkt->req->isStrictlyOrdered();
+            if (strict)
+                forward_time = std::max(forward_time, lastStrictWriteReady);
+            if (pkt->isPim() &&
+                writeBuffer.findMatch(pkt->getBlockAddr(blkSize),
+                                      pkt->isSecure())) {
+                // A writeback of this block, from the eviction in access()
+                // or earlier, must reach memory before a processing-in-
+                // memory (PIM) write to it. The write buffer issues in
+                // ready-time order, and the writeback became ready at
+                // clockEdge(lookupLatency + forwardLatency)
+                // (BaseCache::recvTimingReq), so this write may not be
+                // ready earlier; on a tie it is queued after it.
+                forward_time = std::max(
+                    forward_time, clockEdge(lookupLatency + forwardLatency));
+                DPRINTF(PIM, "PIM write for %#x ordered behind a pending "
+                        "writeback\n", pkt->getAddr());
+            }
+            if (strict)
+                lastStrictWriteReady = forward_time;
             allocateWriteBuffer(pkt, forward_time);
         } else {
             // uncacheable accesses always allocate a new MSHR
@@ -1170,6 +1207,9 @@ Cache::handleSnoop(PacketPtr pkt, CacheBlk *blk, bool is_timing,
         gem5_assert(!(isReadOnly && blk->isSet(CacheBlk::DirtyBit)),
             "Should never have a dirty block in a read-only cache %s\n",
             name());
+
+        if (pkt->isPim())
+            pimSnoopHit(pkt, respond, "block");
     }
 
     // Invalidate any prefetch's from below that would strip write permissions
@@ -1338,6 +1378,9 @@ Cache::recvTimingSnoopReq(PacketPtr pkt)
             pkt->needsResponse();
         bool have_writable = !wb_pkt->hasSharers();
         bool invalidate = pkt->isInvalidate();
+
+        if (pkt->isPim())
+            pimSnoopHit(pkt, respond, "writeback");
 
         if (!pkt->req->isUncacheable() && pkt->isRead() && !invalidate) {
             assert(!pkt->needsWritable());

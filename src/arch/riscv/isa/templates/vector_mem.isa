@@ -136,6 +136,7 @@ def template VleMicroConstructor {{
     if (!_machInst.vm) {
         setSrcRegIdx(_numSrcRegs++, vecRegClass[0]);
     }
+    %(micro_flags_code)s
 }
 
 }};
@@ -336,6 +337,7 @@ def template VseMicroConstructor {{
     }
     this->flags[IsVector] = true;
     this->flags[IsStore] = true;
+    %(micro_flags_code)s
 }
 
 }};

@@ -286,6 +286,19 @@ class SyscallFault : public RiscvFault
 };
 
 /**
+ * Not an architectural fault: a store whose translation is speculative
+ * (BaseMMU::Translation::speculative()) found a leaf PTE with D = 0. The
+ * walk set only A; the store re-executes from commit, when it is the
+ * oldest instruction, and its walk then sets D (D-bit updates are exact,
+ * A-bit updates may be speculative).
+ */
+class DirtyBitAssist : public ReExec
+{
+  public:
+    FaultName name() const override { return "Dirty-bit assist"; }
+};
+
+/**
  * Returns true if the fault passed as a first argument was triggered
  * by a memory access, false otherwise.
  * If true it is storing the faulting address in the va argument

@@ -63,6 +63,7 @@
 #include "base/types.hh"
 #include "cpu/inst_seq.hh"
 #include "mem/htm.hh"
+#include "mem/pim_op.hh"
 #include "sim/cur_tick.hh"
 
 namespace gem5
@@ -171,6 +172,11 @@ class Request : public Extensible<Request>
         ACQUIRE                     = 0x00020000,
         /** The request should be marked with ACQUIRE_PC. */
         ACQUIRE_PC                  = 0x00002000,
+        /**
+         * The request is a processing-in-memory (PIM) request; its
+         * operation is in PIM_OP_MASK (see mem/pim_op.hh).
+         */
+        PIM                         = 0x00004000,
         /** The request should be marked with RELEASE. */
         RELEASE                     = 0x00040000,
 
@@ -262,8 +268,39 @@ class Request : public Extensible<Request>
         /** TLBI_EXT_SYNC_COMP seems to be the largest value
             of FlagsType, so HAS_NO_ADDR's value is that << 1 */
         HAS_NO_ADDR                = 0x0001000000000000,
+        /** The PIM operation (PimOp) of a PIM request, bits 54-58. */
+        PIM_OP_MASK                = 0x07C0000000000000,
         // clang-format on
     };
+
+    /** Position of the PIM operation in the flags. */
+    static constexpr unsigned PIM_OP_SHIFT = 54;
+
+    /** The flags that carry PIM operation op. */
+    static constexpr FlagsType
+    pimOpFlags(PimOp op)
+    {
+        return FlagsType(op) << PIM_OP_SHIFT;
+    }
+
+    static_assert(PIM_OP_MASK == FlagsType(0x1f) << PIM_OP_SHIFT,
+                  "PIM_OP_MASK must be the five bits at PIM_OP_SHIFT");
+    static_assert(NumPimOps <= 0x1f, "PimOp must fit in PIM_OP_MASK");
+    static_assert(((PIM | PIM_OP_MASK) &
+                   (ARCH_BITS | INST_FETCH | PHYSICAL | UNCACHEABLE |
+                    STRICT_ORDER | PRIVILEGED | CACHE_BLOCK_ZERO |
+                    NO_ACCESS | LOCKED_RMW | LLSC | MEM_SWAP |
+                    MEM_SWAP_COND | READ_MODIFY_WRITE | PREFETCH |
+                    PF_EXCLUSIVE | EVICT_NEXT | ACQUIRE | ACQUIRE_PC |
+                    RELEASE | ATOMIC_RETURN_OP | ATOMIC_NO_RETURN_OP |
+                    KERNEL | SECURE | PT_WALK | INVALIDATE | CLEAN |
+                    DST_POU | DST_POC | DST_BITS | HTM_START | HTM_COMMIT |
+                    HTM_CANCEL | HTM_ABORT | TLBI | TLBI_SYNC |
+                    TLBI_EXT_SYNC | TLBI_EXT_SYNC_COMP | STICKY_FLAGS |
+                    HAS_NO_ADDR)) == 0,
+                  "PIM flags must not overlap other request flags");
+    static_assert((PIM & PIM_OP_MASK) == 0,
+                  "PIM and PIM_OP_MASK must be disjoint");
     static const FlagsType STORE_NO_DATA = CACHE_BLOCK_ZERO |
         CLEAN | INVALIDATE;
 
@@ -1022,6 +1059,14 @@ class Request : public Extensible<Request>
     /** Accessor functions for flags. Note that these are for testing
         only; setting flags should be done via setFlags(). */
     bool isUncacheable() const { return _flags.isSet(UNCACHEABLE); }
+    /** A processing-in-memory (PIM) request. */
+    bool isPim() const { return _flags.isSet(PIM); }
+    /** The PIM operation; PimOp::None for a request that is not PIM. */
+    PimOp
+    getPimOp() const
+    {
+        return PimOp((FlagsType(_flags) & PIM_OP_MASK) >> PIM_OP_SHIFT);
+    }
     bool isStrictlyOrdered() const { return _flags.isSet(STRICT_ORDER); }
     bool isInstFetch() const { return _flags.isSet(INST_FETCH); }
     bool hasNoAddr() const { return _flags.isSet(HAS_NO_ADDR); }

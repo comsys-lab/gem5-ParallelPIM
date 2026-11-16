@@ -94,6 +94,8 @@ namespace RiscvISA
               bool doTLBInsert = false;
               bool doWrite = false;
               bool pteIsLeaf = false;
+              // A speculative store found D = 0: set only A.
+              bool dirtyAssist = false;
             };
 
             enum WalkType
@@ -166,7 +168,7 @@ namespace RiscvISA
 
           private:
             Fault checkPTEPermissions(
-              PTESv39 pte, WalkFlags& stepWalkFlags, int level);
+              PTESv39 &pte, WalkFlags& stepWalkFlags, int level);
             Addr setupWalk(Addr vaddr);
             Fault stepWalk(PacketPtr &write);
             Fault stepWalkGStage(PacketPtr &write);

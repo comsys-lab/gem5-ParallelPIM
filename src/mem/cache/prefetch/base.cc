@@ -108,6 +108,7 @@ Base::Base(const BasePrefetcherParams &p)
       prefetchOnAccess(p.prefetch_on_access),
       prefetchOnPfHit(p.prefetch_on_pf_hit),
       useVirtualAddresses(p.use_virtual_addresses),
+      excludedRanges(p.excluded_ranges.begin(), p.excluded_ranges.end()),
       prefetchStats(this), issuedPrefetches(0),
       usefulPrefetches(0), mmu(nullptr)
 {
@@ -148,11 +149,14 @@ Base::StatGroup::StatGroup(statistics::Group *parent)
     ADD_STAT(pfHitInWB, statistics::units::Count::get(),
         "number of prefetches hit in the Write Buffer"),
     ADD_STAT(pfLate, statistics::units::Count::get(),
-        "number of late prefetches (hitting in cache, MSHR or WB)")
+        "number of late prefetches (hitting in cache, MSHR or WB)"),
+    ADD_STAT(pfExcluded, statistics::units::Count::get(),
+        "number of prefetches dropped in an excluded range")
 {
     using namespace statistics;
 
     pfUnused.flags(nozero);
+    pfExcluded.flags(nozero);
 
     accuracy.flags(total);
     accuracy = pfUseful / pfIssued;
@@ -177,6 +181,7 @@ Base::observeAccess(const PacketPtr &pkt, bool miss, bool prefetched) const
             return false;
     }
     if (pkt->req->isUncacheable()) return false;
+    if (isExcluded(pkt->getAddr())) return false;
     if (fetch && !onInst) return false;
     if (!fetch && !onData) return false;
     if (!fetch && read && !onRead) return false;

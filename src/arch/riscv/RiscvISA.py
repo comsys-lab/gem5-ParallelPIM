@@ -78,6 +78,13 @@ class RiscvType(Enum):
     vals = ["RV32", "RV64"]
 
 
+class RiscvPagingMode(Enum):
+    vals = [
+        "sv39",  # Bare and Sv39 (three-level page tables)
+        "sv48",  # Bare, Sv39 and Sv48 (four-level page tables)
+    ]
+
+
 class PrivilegeModeSet(Enum):
     vals = [
         "M",  # Machine privilege mode only
@@ -114,6 +121,14 @@ class RiscvISA(BaseISA):
         # if working with old bbl bootloader)
         "The combination of privilege modes \
         in Privilege Levels section of RISC-V privileged spec",
+    )
+
+    max_paging_mode = Param.RiscvPagingMode(
+        "sv39",
+        "The largest virtual-memory scheme that satp accepts: sv39 or "
+        "sv48. Bare and every smaller scheme are accepted too; a satp "
+        "write with another mode keeps the old one. vsatp and hgatp "
+        "accept only Sv39 and Sv39x4.",
     )
 
     enable_Zicbom_fs = Param.Bool(True, "Enable Zicbom extension in FS mode")

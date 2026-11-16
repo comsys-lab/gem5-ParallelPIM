@@ -106,6 +106,9 @@ class TLB : public BaseTLB
         statistics::Scalar writeHits;
         statistics::Scalar writeMisses;
         statistics::Scalar writeAccesses;
+        /** TLB lookups of processing-in-memory (PIM) requests. */
+        statistics::Scalar pimAccesses;
+        statistics::Scalar pimMisses;
 
         statistics::Formula hits;
         statistics::Formula misses;
@@ -121,6 +124,15 @@ class TLB : public BaseTLB
     TLB(const Params &p);
 
     Walker *getWalker();
+
+    /**
+     * Print one PIM debug-flag line for a translated PIM request (a
+     * no-op for other requests): its operation, direction, addresses,
+     * size, flags and fault; walk marks a translation that finished
+     * after a page-table walk.
+     */
+    void tracePim(const RequestPtr &req, BaseMMU::Mode mode,
+                  const Fault &fault, bool walk) const;
 
     void takeOverFrom(BaseTLB *old) override {}
 

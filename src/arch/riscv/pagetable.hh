@@ -63,6 +63,11 @@ const Addr SV39_LEVELS = 3;
 const Addr SV39_LEVEL_BITS  = 9;
 const Addr SV39X4_WIDENED_BITS = 2;
 
+// Sv48 paging (satp only: vsatp and hgatp stay Sv39 and Sv39x4). Its PTEs
+// have the Sv39 layout; PPN[2] is then bits 36:28 and PPN[3] bits 53:37.
+const Addr SV48_VADDR_BITS = 48;
+const Addr SV48_LEVELS = 4;
+
 BitUnion64(PTESv39)
     Bitfield<63> n;
     Bitfield<62, 54> reserved;
@@ -88,6 +93,19 @@ EndBitUnion(PTESv39)
  */
 Addr getVPNFromVAddr(Addr vaddr, Addr mode);
 
+/** Virtual-address bits of a satp MODE: 48 for Sv48, else 39 (Sv39). */
+unsigned vaddrBits(Addr mode);
+
+/** Page-table levels of a satp MODE: 4 for Sv48, else 3 (Sv39). */
+unsigned pagingLevels(Addr mode);
+
+/**
+ * Whether bits 63 down to the top virtual-address bit of mode are all
+ * equal, as the privileged spec requires for Sv39 and Sv48 (else the
+ * access page-faults).
+ */
+bool isCanonical(Addr vaddr, Addr mode);
+
 struct TlbEntry;
 typedef Trie<Addr, TlbEntry> TlbEntryTrie;
 
@@ -103,6 +121,9 @@ struct TlbEntry : public Serializable
 
     uint16_t asid;
 
+    // The satp MODE the entry was walked in; its TLB key depends on it.
+    unsigned xlateMode;
+
     PTESv39 pte;
 
     PTESv39 gpte;
@@ -113,7 +134,8 @@ struct TlbEntry : public Serializable
     uint64_t lruSeq;
 
     TlbEntry()
-        : paddr(0), vaddr(0), logBytes(0), pte(), gpte(), lruSeq(0)
+        : paddr(0), vaddr(0), logBytes(0), xlateMode(SV39), pte(), gpte(),
+          lruSeq(0)
     {}
 
     // Return the page size in bytes
@@ -125,6 +147,7 @@ struct TlbEntry : public Serializable
     void reset()
     {
         paddr = vaddr = logBytes = pte = gpte = lruSeq = 0;
+        xlateMode = SV39;
     }
 
     void serialize(CheckpointOut &cp) const override;
